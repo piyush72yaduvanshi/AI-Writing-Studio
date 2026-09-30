@@ -1,0 +1,186 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai_writing_studio_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aiwritingstudio}
+      POSTGRES_USER: ${POSTGRES_USER:-studio_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studio_secret_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-studio_user} -d ${POSTGRES_DB:-aiwritingstudio}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    networks:
+      - studio_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai_writing_studio_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - studio_network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai_writing_studio_qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - studio_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_writing_studio_backend
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-ai-writing-studio-production-key-928374982734}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,nginx,frontend}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:80,http://localhost}
+      POSTGRES_DB: ${POSTGRES_DB:-aiwritingstudio}
+      POSTGRES_USER: ${POSTGRES_USER:-studio_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studio_secret_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-chat}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-writing_references}
+      AI_MAX_INPUT_LENGTH: ${AI_MAX_INPUT_LENGTH:-12000}
+      AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-4096}
+      AI_TOP_K: ${AI_TOP_K:-4}
+      AI_SIMILARITY_THRESHOLD: ${AI_SIMILARITY_THRESHOLD:-0.65}
+      AI_CACHE_TTL: ${AI_CACHE_TTL:-86400}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - studio_network
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_writing_studio_celery
+    restart: unless-stopped
+    command: ["celery", "-A", "config", "worker", "-l", "info", "--concurrency=2"]
+    volumes:
+      - ./backend:/app
+      - media_data:/app/media
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-ai-writing-studio-production-key-928374982734}
+      POSTGRES_DB: ${POSTGRES_DB:-aiwritingstudio}
+      POSTGRES_USER: ${POSTGRES_USER:-studio_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studio_secret_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-chat}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - studio_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai_writing_studio_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - studio_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: ai_writing_studio_gateway
+    restart: unless-stopped
+    ports:
+      - "${PORT_NGINX:-80}:80"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_data:/app/staticfiles:ro
+      - media_data:/app/media:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - studio_network
+
+volumes:
+  postgres_data:
+    name: ai_writing_studio_postgres_data
+  redis_data:
+    name: ai_writing_studio_redis_data
+  qdrant_data:
+    name: ai_writing_studio_qdrant_data
+  static_data:
+    name: ai_writing_studio_static_data
+  media_data:
+    name: ai_writing_studio_media_data
+
+networks:
+  studio_network:
+    name: ai_writing_studio_network
+    driver: bridge

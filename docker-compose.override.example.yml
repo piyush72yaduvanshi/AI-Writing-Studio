@@ -1,0 +1,18 @@
+# ==============================================================================
+# AI Writing Studio - NVIDIA GPU Acceleration Override
+# ==============================================================================
+# To enable GPU acceleration for Ollama:
+# 1. Ensure NVIDIA GPU drivers and the NVIDIA Container Toolkit are installed.
+# 2. Rename this file to `docker-compose.override.yml` or run:
+#    docker compose -f docker-compose.yml -f docker-compose.override.example.yml up -d
+# ==============================================================================
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
