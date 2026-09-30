@@ -121,8 +121,8 @@ Powered by a **Multi-Provider AI Engine** ([OpenRouter](https://openrouter.ai) w
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/ai-writing-studio.git
-cd ai-writing-studio
+git clone https://github.com/piyush72yaduvanshi/AI-Writing-Studio
+cd AI-Writing-Studio
 ```
 
 ### 2. Configure Environment
